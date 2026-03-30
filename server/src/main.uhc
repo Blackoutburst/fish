@@ -1,0 +1,165 @@
+#include <stdlib.h>
+
+#include <uhcnet.uhh>
+#include <uhcstd.uhh>
+#include <uhcio.uhh>
+
+#define MAX_SLOTS 10
+#define TICK_MS 50
+
+struct SlotState {
+    U8 active;
+    TcpClient.It client;
+    F32 x, y, z;
+    F32 yaw, pitch;
+};
+
+static SlotState slots[MAX_SLOTS];
+static Mutex.It mutex;
+static TcpServer.It server;
+
+I32 findFreeSlot() {
+    for (I32 i = 0; i < MAX_SLOTS; i++)
+        if (!slots[i].active) return i;
+    return -1;
+}
+
+U0 closeSlotSocket(I32 id) {
+    #if defined(_WIN32) || defined(_WIN64)
+        closesocket(slots[id].client.sockfd);
+        slots[id].client.sockfd = INVALID_SOCKET;
+    #else
+        close(slots[id].client.sockfd);
+        slots[id].client.sockfd = -1;
+    #endif
+}
+
+U0* clientThread(U0* arg) {
+    I32 id = *(I32*)arg;
+    free(arg);
+
+    U8 raw[20];
+    Buffer.It buf = {};
+    buf.handle = raw;
+    Buffer.setOrder(buf, UHC_BIG_ENDIAN);
+
+    while (1) {
+        if (!TcpServer.readAll(slots[id].client, (I8*)raw, 20)) break;
+
+        Buffer.reset(buf);
+        F32 x = Buffer.getF32(buf);
+        F32 y = Buffer.getF32(buf);
+        F32 z = Buffer.getF32(buf);
+        F32 yaw = Buffer.getF32(buf);
+        F32 pitch = Buffer.getF32(buf);
+
+        Mutex.lock(mutex);
+        slots[id].x = x;
+        slots[id].y = y;
+        slots[id].z = z;
+        slots[id].yaw = yaw;
+        slots[id].pitch = pitch;
+        Mutex.unlock(mutex);
+    }
+
+    Mutex.lock(mutex);
+    slots[id].active = 0;
+    closeSlotSocket(id);
+    Mutex.unlock(mutex);
+
+    Log.info("Client %d disconnected", id);
+    return NULL;
+}
+
+U0* tickThread(U0* arg) {
+    unused arg;
+
+    U8 raw[1 + MAX_SLOTS * 21];
+    Buffer.It buf = {};
+    buf.handle = raw;
+    Buffer.setOrder(buf, UHC_BIG_ENDIAN);
+
+    while (server.running) {
+        #if defined(_WIN32) || defined(_WIN64)
+            Sleep(TICK_MS);
+        #else
+            usleep(TICK_MS * 1000);
+        #endif
+        Mutex.lock(mutex);
+
+        U8 activeCount = 0;
+        for (I32 i = 0; i < MAX_SLOTS; i++)
+            if (slots[i].active) activeCount++;
+
+        for (I32 sendTo = 0; sendTo < MAX_SLOTS; sendTo++) {
+            if (!slots[sendTo].active) continue;
+
+            U8 others = activeCount - 1;
+            Buffer.reset(buf);
+            Buffer.putU8(buf, others);
+
+            for (I32 i = 0; i < MAX_SLOTS; i++) {
+                if (!slots[i].active || i == sendTo) continue;
+                Buffer.putU8 (buf, (U8)i);
+                Buffer.putF32(buf, slots[i].x);
+                Buffer.putF32(buf, slots[i].y);
+                Buffer.putF32(buf, slots[i].z);
+                Buffer.putF32(buf, slots[i].yaw);
+                Buffer.putF32(buf, slots[i].pitch);
+            }
+
+            TcpServer.write(slots[sendTo].client, (I8*)raw, (U32)(1 + (I32)others * 21));
+        }
+
+        Mutex.unlock(mutex);
+    }
+    return NULL;
+}
+
+U0 onClientConnect(TcpClient.It* client) {
+    Mutex.lock(mutex);
+    I32 id = findFreeSlot();
+    if (id < 0) {
+        Mutex.unlock(mutex);
+        Log.info("Server full — rejecting client");
+        #if defined(_WIN32) || defined(_WIN64)
+            closesocket(client->sockfd);
+        #else
+            close(client->sockfd);
+        #endif
+        return;
+    }
+
+    slots[id].active = 1;
+    slots[id].client = *client;
+    slots[id].x = 0; 
+    slots[id].y = 0; 
+    slots[id].z = 0;
+    slots[id].yaw = 0; 
+    slots[id].pitch = 0;
+    Mutex.unlock(mutex);
+
+    U8 idBuf[1] = { (U8)id };
+    TcpServer.write(*client, (I8*)idBuf, 1);
+
+    Log.info("Client %d connected", id);
+
+    I32* idArg = (I32*)malloc(sizeof(I32));
+    *idArg = id;
+    Thread.start(clientThread, (U0*)idArg);
+}
+
+I32 main() {
+    mutex = Mutex.create();
+    for (I32 i = 0; i < MAX_SLOTS; i++) slots[i].active = 0;
+
+    server = TcpServer.create(7777, MAX_SLOTS);
+    Log.info("Server listening on port 7777");
+
+    Thread.start(tickThread, NULL);
+    TcpServer.listen(server, onClientConnect);
+
+    Mutex.destroy(mutex);
+    TcpServer.destroy(server);
+    return 0;
+}

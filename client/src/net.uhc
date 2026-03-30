@@ -1,0 +1,154 @@
+#include <stdlib.h>
+
+#include <uhcnet.uhh>
+#include <uhcstd.uhh>
+
+#include "net.uhh"
+
+#define NET_TICK_MS 50
+
+namespace Net {
+    TcpClient.It client;
+    Mutex.It mutex;
+    RemotePlayer.It players[NET_MAX_PLAYERS];
+    U8 myId = 255;
+    F32 myX = 0;
+    F32 myY = 0;
+    F32 myZ = 0;
+    F32 myYaw = 0;
+    F32 myPitch = 0;
+    U8 connected = 0;
+    Thread.It sendThread;
+    Thread.It recvThread;
+
+    U8 getMyId() { return myId; }
+    U8 isConnected() { return connected; }
+    U0 lockPlayers() { Mutex.lock(mutex); }
+    U0 unlockPlayers() { Mutex.unlock(mutex); }
+    RemotePlayer.It* getPlayers() { return players; }
+
+    U0 setLocalState(F32 x, F32 y, F32 z, F32 yaw, F32 pitch) {
+        Mutex.lock(mutex);
+        myX = x;
+        myY = y;
+        myZ = z;
+        myYaw = yaw;
+        myPitch = pitch;
+        Mutex.unlock(mutex);
+    }
+
+    U0* sendLoop(U0* arg) {
+        unused arg;
+        
+        U8 raw[20];
+        Buffer.It buf = {};
+        buf.handle = raw;
+        Buffer.setOrder(buf, UHC_BIG_ENDIAN);
+
+        while (connected) {
+            Mutex.lock(mutex);
+            F32 x = myX;
+            F32 y = myY;
+            F32 z = myZ;
+            F32 yaw = myYaw;
+            F32 pitch = myPitch;
+            Mutex.unlock(mutex);
+
+            Buffer.reset(buf);
+            Buffer.putF32(buf, x);
+            Buffer.putF32(buf, y);
+            Buffer.putF32(buf, z);
+            Buffer.putF32(buf, yaw);
+            Buffer.putF32(buf, pitch);
+
+            TcpClient.write(client, (I8*)raw, 20);
+
+            #if defined(_WIN32) || defined(_WIN64)
+                Sleep(NET_TICK_MS);
+            #else
+                usleep(NET_TICK_MS * 1000);
+            #endif
+        }
+        return NULL;
+    }
+
+    U0* recvLoop(U0* arg) {
+        unused arg;
+        
+        U8 headerBuf[1];
+        U8 dataBuf[21 * NET_MAX_PLAYERS];
+        Buffer.It buf = {};
+        buf.handle = dataBuf;
+        Buffer.setOrder(buf, UHC_BIG_ENDIAN);
+
+        while (connected) {
+            if (!TcpClient.readAll(client, (I8*)headerBuf, 1)) break;
+            U8 count = headerBuf[0];
+
+            if (count > 0) {
+                U32 dataSize = (U32)count * 21;
+                if (!TcpClient.readAll(client, (I8*)dataBuf, dataSize)) break;
+            }
+
+            Mutex.lock(mutex);
+
+            for (I32 i = 0; i < NET_MAX_PLAYERS; i++) {
+                if ((U8)i != myId) players[i].active = 0;
+            }
+
+            Buffer.reset(buf);
+            for (U8 j = 0; j < count; j++) {
+                U8 id = Buffer.getU8(buf);
+                F32 x = Buffer.getF32(buf);
+                F32 y = Buffer.getF32(buf);
+                F32 z = Buffer.getF32(buf);
+                F32 yaw = Buffer.getF32(buf);
+                F32 pitch = Buffer.getF32(buf);
+                if (id < NET_MAX_PLAYERS) {
+                    players[id].active = 1;
+                    players[id].targetX = x;
+                    players[id].targetY = y;
+                    players[id].targetZ = z;
+                    players[id].targetYaw = yaw;
+                    players[id].targetPitch = pitch;
+                }
+            }
+
+            Mutex.unlock(mutex);
+        }
+
+        connected = 0;
+        return NULL;
+    }
+
+    U0 init(I8* ip, I16 port) {
+        mutex = Mutex.create();
+
+        for (I32 i = 0; i < NET_MAX_PLAYERS; i++) {
+            players[i].active = 0;
+            players[i].smoothX = 0; 
+            players[i].smoothY = 0; 
+            players[i].smoothZ = 0;
+            players[i].smoothYaw = 0;
+            players[i].smoothPitch = 0;
+        }
+
+        client = TcpClient.create(ip, port);
+
+        U8 idBuf[1];
+        TcpClient.readAll(client, (I8*)idBuf, 1);
+        myId = idBuf[0];
+
+        connected = 1;
+        sendThread = Thread.start(sendLoop, NULL);
+        recvThread = Thread.start(recvLoop, NULL);
+    }
+
+    U0 destroy() {
+        connected = 0;
+        TcpClient.destroy(client);
+        Thread.join(sendThread);
+        Thread.join(recvThread);
+        Mutex.destroy(mutex);
+    }
+}

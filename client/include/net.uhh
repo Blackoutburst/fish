@@ -1,0 +1,26 @@
+#pragma once
+
+#include <uhcstd.uhh>
+
+#define NET_MAX_PLAYERS 10
+
+namespace RemotePlayer {
+    struct It {
+        U8  active;
+        F32 targetX, targetY, targetZ;
+        F32 targetYaw, targetPitch;
+        F32 smoothX, smoothY, smoothZ;
+        F32 smoothYaw, smoothPitch;
+    };
+}
+
+namespace Net {
+    U0 init(I8* ip, I16 port);
+    U0 destroy();
+    U0 setLocalState(F32 x, F32 y, F32 z, F32 yaw, F32 pitch);
+    U0 lockPlayers();
+    U0 unlockPlayers();
+    RemotePlayer.It* getPlayers();
+    U8 getMyId();
+    U8 isConnected();
+}

@@ -1,0 +1,22 @@
+#pragma once
+
+#include <uhcmath.uhh>
+#include <uhcgraphics.uhh>
+#include "heightmap.uhh"
+
+namespace Camera {
+    struct It {
+        Matrix.It view;
+        VectorF.It position;
+        F32 pitch = 0;
+        F32 yaw = 0;
+        F64 prevMouseX = 0;
+        F64 prevMouseY = 0;
+        F64 prevTime = 0;
+        F32 velY = 0;
+        bool onGround = false;
+    };
+
+    Camera.It create();
+    U0 update(UgWindow.It& window, Camera.It& camera, Heightmap.It& hm);
+}

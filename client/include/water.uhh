@@ -1,0 +1,21 @@
+#pragma once
+
+#include <uhcgraphics.uhh>
+
+namespace Water {
+    struct It {
+        UgMaterial.It material;
+        UgUniformBuffer.It ubo;
+        UgBuffer.It vertexBuffer;
+        Matrix.It model;
+        U32 vertexCount;
+        F32 terrainW = 300.0f;
+        F32 terrainD = 300.0f;
+        U32 vertCount;
+
+    };
+
+    Water.It create(UgContext.It& ctx, UgRenderer.It& renderer);
+    U0 render(Water.It& water, UgRenderer.It& renderer, UgCommandBuffer.It cmd, Matrix.It view, Matrix.It projection);
+    U0 destroy(UgContext.It ctx, Water.It& water);
+}

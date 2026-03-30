@@ -1,0 +1,90 @@
+#include <GLFW/glfw3.h>
+
+#include "camera.uhh"
+
+#define CAMERA_SPEED       10
+#define CAMERA_SENSITIVITY 0.1
+#define GRAVITY            -60.0f
+#define JUMP_VELOCITY       15.0f
+#define PLAYER_HEIGHT       3.0f
+
+namespace Camera {
+    Camera.It create() {
+        Matrix.It view;
+        Matrix.setIdentity(view);
+        VectorF.It position = {0, 0, 0, 0};
+
+        Camera.It camera = {};
+        camera.view     = view;
+        camera.position = position;
+
+        return camera;
+    }
+
+    U0 update(UgWindow.It& window, Camera.It& camera, Heightmap.It& hm) {
+        F64 now = glfwGetTime();
+        F64 dt  = now - camera.prevTime;
+        camera.prevTime = now;
+        F32 fdt = (F32)dt;
+
+        F32 speed = (F32)(CAMERA_SPEED * dt);
+
+        if (glfwGetKey(window.handle, GLFW_KEY_W) == GLFW_PRESS) {
+            camera.position.x -= sin(Math.rad(-camera.yaw)) * speed;
+            camera.position.z -= cos(Math.rad(-camera.yaw)) * speed;
+        }
+        if (glfwGetKey(window.handle, GLFW_KEY_S) == GLFW_PRESS) {
+            camera.position.x += sin(Math.rad(-camera.yaw)) * speed;
+            camera.position.z += cos(Math.rad(-camera.yaw)) * speed;
+        }
+        if (glfwGetKey(window.handle, GLFW_KEY_A) == GLFW_PRESS) {
+            camera.position.x += sin(Math.rad(-camera.yaw - 90)) * speed;
+            camera.position.z += cos(Math.rad(-camera.yaw - 90)) * speed;
+        }
+        if (glfwGetKey(window.handle, GLFW_KEY_D) == GLFW_PRESS) {
+            camera.position.x += sin(Math.rad(-camera.yaw + 90)) * speed;
+            camera.position.z += cos(Math.rad(-camera.yaw + 90)) * speed;
+        }
+
+        camera.velY += GRAVITY * fdt;
+        camera.position.y += camera.velY * fdt;
+
+        F32 groundY = Heightmap.getHeight(hm, camera.position.x, camera.position.z);
+        F32 minY    = PLAYER_HEIGHT - groundY;
+        if (camera.position.y <= minY) {
+            camera.position.y = minY;
+            camera.velY       = 0.0f;
+            camera.onGround   = true;
+        } else {
+            camera.onGround = false;
+        }
+
+        if (glfwGetKey(window.handle, GLFW_KEY_SPACE) == GLFW_PRESS && camera.onGround) {
+            camera.velY     = JUMP_VELOCITY;
+            camera.onGround = false;
+        }
+
+        F64 mouseX = 0;
+        F64 mouseY = 0;
+        glfwGetCursorPos(window.handle, &mouseX, &mouseY);
+
+        F64 yawOffset   = mouseX - camera.prevMouseX;
+        F64 pitchOffset = mouseY - camera.prevMouseY;
+
+        pitchOffset *= CAMERA_SENSITIVITY;
+        yawOffset   *= CAMERA_SENSITIVITY;
+
+        camera.prevMouseX = mouseX;
+        camera.prevMouseY = mouseY;
+
+        camera.yaw   += yawOffset;
+        camera.pitch -= pitchOffset;
+        if (camera.pitch >  89) camera.pitch =  89;
+        if (camera.pitch < -89) camera.pitch = -89;
+
+        Matrix.setIdentity(camera.view);
+        Matrix.rotate(camera.view, Math.rad(camera.pitch), 1, 0, 0);
+        Matrix.rotate(camera.view, Math.rad(camera.yaw),   0, 1, 0);
+        Matrix.translate(camera.view, -camera.position.x, camera.position.y, -camera.position.z, 0);
+    }
+}

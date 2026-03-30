@@ -1,0 +1,95 @@
+#include <stdlib.h>
+
+#include "water.uhh"
+
+#define WATER_RES   100
+#define WATER_AMP   0.2f
+
+namespace Water {
+    Water.It create(UgContext.It& ctx, UgRenderer.It& renderer) {
+        Water.It water = {};
+
+        U32 gridPts = (WATER_RES + 1) * (WATER_RES + 1);
+        water.vertCount = WATER_RES * WATER_RES * 6;
+
+        F32* phase = (F32*)malloc(gridPts * sizeof(F32));
+        srand(42);
+        for (U32 i = 0; i < gridPts; i++)
+            phase[i] = (F32)(rand() % 62832) / 10000.0f;
+
+        F32* vertices = (F32*)malloc(water.vertCount * 3 * sizeof(F32));
+        U32 vi = 0;
+        for (I32 wr = 0; wr < WATER_RES; wr++) {
+            for (I32 wc = 0; wc < WATER_RES; wc++) {
+                F32 x0 = ((F32)wc / WATER_RES - 0.5f) * water.terrainW;
+                F32 x1 = ((F32)(wc + 1) / WATER_RES - 0.5f) * water.terrainW;
+                F32 z0 = ((F32)wr / WATER_RES - 0.5f) * water.terrainD;
+                F32 z1 = ((F32)(wr + 1) / WATER_RES - 0.5f) * water.terrainD;
+
+                F32 ph00 = phase[wr * (WATER_RES + 1) + wc];
+                F32 ph10 = phase[wr * (WATER_RES + 1) + (wc + 1)];
+                F32 ph01 = phase[(wr + 1) * (WATER_RES + 1) + wc];
+                F32 ph11 = phase[(wr + 1) * (WATER_RES + 1) + (wc + 1)];
+
+                vertices[vi++]=x0; vertices[vi++]=z0; vertices[vi++]=ph00;
+                vertices[vi++]=x1; vertices[vi++]=z0; vertices[vi++]=ph10;
+                vertices[vi++]=x0; vertices[vi++]=z1; vertices[vi++]=ph01;
+
+                vertices[vi++]=x1; vertices[vi++]=z0; vertices[vi++]=ph10;
+                vertices[vi++]=x1; vertices[vi++]=z1; vertices[vi++]=ph11;
+                vertices[vi++]=x0; vertices[vi++]=z1; vertices[vi++]=ph01;
+            }
+        }
+        free(phase);
+
+        UgVertexAttrib.It attrs[2] = {
+            { 0, VK_FORMAT_R32G32_SFLOAT, 0 },
+            { 1, VK_FORMAT_R32_SFLOAT,    8 },
+        };
+        UgVertexDesc.It desc = { 12, attrs, 2 };
+
+        UgBuffer.It vertexBuffer = UgBuffer.create(ctx, water.vertCount * 3 * sizeof(F32), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+        UgBuffer.upload(ctx, vertexBuffer, vertices, water.vertCount * 3 * sizeof(F32));
+        free(vertices);
+
+        UgUniformBuffer.It ubo = UgUniformBuffer.create(ctx, 0, 208);
+
+        UgMaterial.It material = UgMaterial.create(ctx, renderer.swapchain, "./shader/waterVert.spv", "./shader/waterFrag.spv", desc, 0, ubo, {});
+
+        Matrix.It model;
+        Matrix.setIdentity(model);
+
+        water.vertexBuffer = vertexBuffer;
+        water.ubo = ubo;
+        water.material = material;
+        water.model = model;
+
+        return water;
+    }
+
+    U0 render(Water.It& water, UgRenderer.It& renderer, UgCommandBuffer.It cmd, Matrix.It view, Matrix.It projection) {
+        VectorF.It lightDir = { -1, 0.8, -1, 0 };
+        UgMaterial.bind(water.material, renderer.renderPass, cmd, water.ubo);
+
+        UgUniformBuffer.reset(water.ubo);
+        UgUniformBuffer.setMat(water.ubo, water.model);
+        UgUniformBuffer.setMat(water.ubo, view);
+        UgUniformBuffer.setMat(water.ubo, projection);
+        UgUniformBuffer.setVec3f(water.ubo, lightDir);
+        UgUniformBuffer.setFloat(water.ubo, (F32)glfwGetTime());
+
+        VkBuffer vertexBuffers[] = { water.vertexBuffer.handle };
+        VkDeviceSize offsets[] = { 0 };
+        vkCmdBindVertexBuffers(cmd.handle, 0, 1, vertexBuffers, offsets);
+        vkCmdDraw(cmd.handle, water.vertCount, 1, 0, 0);
+    }
+
+    U0 destroy(UgContext.It ctx, Water.It& water) {
+        vkDeviceWaitIdle(ctx.device.handle);
+
+        UgBuffer.destroy(ctx, water.vertexBuffer);
+        UgUniformBuffer.destroy(ctx, water.ubo);
+        UgMaterial.destroy(ctx, water.material);
+    }
+
+}

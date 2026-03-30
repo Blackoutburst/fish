@@ -1,0 +1,18 @@
+#pragma once
+
+#include <uhcgraphics.uhh>
+#include "heightmap.uhh"
+
+namespace Terrain {
+    struct It {
+        UgMaterial.It material;
+        UgUniformBuffer.It ubo;
+        UgBuffer.It vertexBuffer;
+        Matrix.It model;
+        U32 vertexCount;
+    };
+
+    Terrain.It create(UgContext.It& ctx, UgRenderer.It& renderer, Heightmap.It& hm);
+    U0 render(Terrain.It& terrain, UgRenderer.It& renderer, UgCommandBuffer.It cmd, Matrix.It view, Matrix.It projection);
+    U0 destroy(UgContext.It ctx, Terrain.It& terrain);
+}

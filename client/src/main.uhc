@@ -1,0 +1,236 @@
+#include <math.h>
+
+#include <uhcgraphics.uhh>
+#include <GLFW/glfw3.h>
+
+#include "heightmap.uhh"
+#include "terrain.uhh"
+#include "water.uhh"
+#include "camera.uhh"
+#include "net.uhh"
+
+static U32 CUBE_IDX_COUNT  = 36;
+
+static F32 CUBE_VERTS[144] = {
+    // Front (z+, normal  0, 0, 1)
+    -1,-1, 1,  0, 0,-1,
+     1,-1, 1,  0, 0,-1,
+     1, 1, 1,  0, 0,-1,
+    -1, 1, 1,  0, 0,-1,
+    // Back  (z-, normal  0, 0,-1)
+     1,-1,-1,  0, 0, 1,
+    -1,-1,-1,  0, 0, 1,
+    -1, 1,-1,  0, 0, 1,
+     1, 1,-1,  0, 0, 1,
+    // Left  (x-, normal -1, 0, 0)
+    -1,-1,-1,  1, 0, 0,
+    -1,-1, 1,  1, 0, 0,
+    -1, 1, 1,  1, 0, 0,
+    -1, 1,-1,  1, 0, 0,
+    // Right (x+, normal  1, 0, 0)
+     1,-1, 1,  -1, 0, 0,
+     1,-1,-1,  -1, 0, 0,
+     1, 1,-1,  -1, 0, 0,
+     1, 1, 1,  -1, 0, 0,
+    // Top   (y+, normal  0, 1, 0)
+    -1, 1, 1,  0,-1, 0,
+     1, 1, 1,  0,-1, 0,
+     1, 1,-1,  0,-1, 0,
+    -1, 1,-1,  0,-1, 0,
+    // Bottom(y-, normal  0,-1, 0)
+    -1,-1,-1,  0, 1, 0,
+     1,-1,-1,  0, 1, 0,
+     1,-1, 1,  0, 1, 0,
+    -1,-1, 1,  0, 1, 0,
+};
+
+static U32 CUBE_IDX[36] = {
+     0, 1, 2,   2, 3, 0,
+     4, 5, 6,   6, 7, 4,
+     8, 9,10,  10,11, 8,
+    12,13,14,  14,15,12,
+    16,17,18,  18,19,16,
+    20,21,22,  22,23,20,
+};
+
+static F32 expDecay(F32 a, F32 b, F32 decay, F64 delta) {
+    return b + (a - b) * expf((F32)(-decay * (F32)delta));
+}
+
+I32 main(I32 argc, I8** argv) {
+    I8* serverIp = (argc > 1) ? argv[1] : (I8*)"127.0.0.1";
+
+    UgWindow.It window = UgWindow.create("Fish");
+    glfwSetInputMode(window.handle, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+
+    UgContext.It ctx = UgContext.create(window, 1);
+    UgRenderer.It renderer = UgRenderer.create(ctx);
+    UgCommandBuffer.It cmd = UgCommandBuffer.create(ctx);
+    UgFence.It fence = UgFence.create(ctx);
+
+    Matrix.It projection;
+    Matrix.It projection2D;
+
+    Matrix.setIdentity(projection);
+
+    VkExtent2D ext = UgSwapchain.extend(ctx, renderer.swapchain);
+    Matrix.projection(projection, ext.width, ext.height, 90, 0.1, 1000);
+    Matrix.ortho2D(projection2D, 0, ext.width, 0, ext.height, -1, 1);
+
+    Heightmap.It heightmap = Heightmap.load("./heightmap.bmp", 300.0f, 300.0f, 20.0f);
+    Terrain.It terrain = Terrain.create(ctx, renderer, heightmap);
+    Water.It water = Water.create(ctx, renderer);
+
+    UgUtils.setClearColor(0.509803922, 0.780392157, 0.949019608, 1);
+
+    Camera.It camera = Camera.create();
+
+    UgBuffer.It cubeVB = UgBuffer.create(ctx, sizeof(CUBE_VERTS), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    UgBuffer.It cubeIB = UgBuffer.create(ctx, sizeof(CUBE_IDX),   VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+    UgBuffer.upload(ctx, cubeVB, CUBE_VERTS, sizeof(CUBE_VERTS));
+    UgBuffer.upload(ctx, cubeIB, CUBE_IDX,   sizeof(CUBE_IDX));
+
+    UgVertexAttrib.It cubeAttrs[2] = {
+        { 0, VK_FORMAT_R32G32B32_SFLOAT, 0  },
+        { 1, VK_FORMAT_R32G32B32_SFLOAT, 12 },
+    };
+    UgVertexDesc.It cubeDesc = { 24, cubeAttrs, 2 };
+
+    UgUniformBuffer.It cubeUbos[NET_MAX_PLAYERS];
+    for (I32 i = 0; i < NET_MAX_PLAYERS; i++)
+        cubeUbos[i] = UgUniformBuffer.create(ctx, 0, 204);
+
+    UgMaterial.It cubeMat = UgMaterial.create(ctx, renderer.swapchain,
+        "./shader/terrainVert.spv", "./shader/terrainFrag.spv",
+        cubeDesc, 0, cubeUbos[0], {});
+
+    Net.init(serverIp, (I16)7777);
+
+    F64 prevTime = glfwGetTime();
+
+    while (UgWindow.isOpen(window)) {
+        Camera.update(window, camera, heightmap);
+
+        F64 now = glfwGetTime();
+        F64 dt  = now - prevTime;
+        prevTime = now;
+
+        Net.setLocalState(
+            camera.position.x,
+            camera.position.y,
+            camera.position.z,
+            camera.yaw,
+            camera.pitch
+        );
+
+        RemotePlayer.It snapshot[NET_MAX_PLAYERS];
+        Net.lockPlayers();
+        
+        RemotePlayer.It* ps = Net.getPlayers();
+        for (I32 i = 0; i < NET_MAX_PLAYERS; i++) {
+            if (ps[i].active) {
+                ps[i].smoothX = expDecay(ps[i].smoothX, ps[i].targetX, 10.0f, dt);
+                ps[i].smoothY = expDecay(ps[i].smoothY, ps[i].targetY, 10.0f, dt);
+                ps[i].smoothZ = expDecay(ps[i].smoothZ, ps[i].targetZ, 10.0f, dt);
+                ps[i].smoothYaw = expDecay(ps[i].smoothYaw, ps[i].targetYaw, 10.0f, dt);
+                ps[i].smoothPitch = expDecay(ps[i].smoothPitch, ps[i].targetPitch, 10.0f, dt);
+            }
+            snapshot[i] = ps[i];
+        }
+        Net.unlockPlayers();
+
+        UgWindow.update();
+        if (UgWindow.isMinimized(window)) continue;
+
+        UgFence.wait(ctx, fence);
+        VkResult acquireResult = UgRenderer.aquire(ctx, renderer);
+        if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR) {
+            UgRenderer.update(ctx, renderer);
+            VkExtent2D ext = UgSwapchain.extend(ctx, renderer.swapchain);
+            Matrix.projection(projection, ext.width, ext.height, 90, 0.1, 1000);
+            Matrix.ortho2D(projection2D, 0, ext.width, 0, ext.height, -1, 1);
+            continue;
+        }
+
+        UgFence.reset(ctx, fence);
+
+        UgCommandBuffer.begin(cmd);
+        UgRenderer.begin(renderer, cmd);
+        UgRenderer.setViewport(ctx, renderer, cmd);
+
+        Terrain.render(terrain, renderer, cmd, camera.view, projection);
+
+        {
+            VkBuffer     vbs[]     = { cubeVB.handle };
+            VkDeviceSize offsets[] = { 0 };
+            vkCmdBindVertexBuffers(cmd.handle, 0, 1, vbs, offsets);
+            vkCmdBindIndexBuffer(cmd.handle, cubeIB.handle, 0, VK_INDEX_TYPE_UINT32);
+
+            VectorF.It lightDir = { -1, 0.8f, -1, 0 };
+            U8 myId = Net.getMyId();
+            U8 firstCube = 1;
+
+            for (I32 i = 0; i < NET_MAX_PLAYERS; i++) {
+                if (!snapshot[i].active || (U8)i == myId) continue;
+
+                Matrix.It cubeModel;
+                Matrix.setIdentity(cubeModel);
+                Matrix.translate(cubeModel, snapshot[i].smoothX, -snapshot[i].smoothY, snapshot[i].smoothZ, 0);
+                Matrix.rotate(cubeModel, -Math.rad(snapshot[i].smoothYaw), 0, 1, 0);
+                Matrix.rotate(cubeModel, -Math.rad(snapshot[i].smoothPitch), 1, 0, 0);
+
+                if (firstCube) {
+                    UgMaterial.bind(cubeMat, renderer.renderPass, cmd, cubeUbos[i]);
+                    firstCube = 0;
+                } else {
+                    UgUniformBuffer.bind(cubeUbos[i], cmd.handle, cubeMat.layout);
+                }
+
+                UgUniformBuffer.reset(cubeUbos[i]);
+                UgUniformBuffer.setMat(cubeUbos[i], cubeModel);
+                UgUniformBuffer.setMat(cubeUbos[i], camera.view);
+                UgUniformBuffer.setMat(cubeUbos[i], projection);
+                UgUniformBuffer.setVec3f(cubeUbos[i], lightDir);
+
+                vkCmdDrawIndexed(cmd.handle, CUBE_IDX_COUNT, 1, 0, 0, 0);
+            }
+            
+            Water.render(water, renderer, cmd, camera.view, projection);
+        }
+
+        UgRenderer.end(cmd);
+        UgCommandBuffer.end(cmd);
+
+        UgRenderer.submit(ctx, renderer, cmd, fence);
+        VkResult presentResult = UgRenderer.present(ctx, renderer);
+        if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR) {
+            UgRenderer.update(ctx, renderer);
+            VkExtent2D ext = UgSwapchain.extend(ctx, renderer.swapchain);
+            Matrix.projection(projection, ext.width, ext.height, 90, 0.1, 1000);
+            Matrix.ortho2D(projection2D, 0, ext.width, 0, ext.height, -1, 1);
+        }
+    }
+
+    vkDeviceWaitIdle(ctx.device.handle);
+
+    Net.destroy();
+
+    for (I32 i = 0; i < NET_MAX_PLAYERS; i++)
+        UgUniformBuffer.destroy(ctx, cubeUbos[i]);
+        
+    UgMaterial.destroy(ctx, cubeMat);
+    UgBuffer.destroy(ctx, cubeIB);
+    UgBuffer.destroy(ctx, cubeVB);
+
+    Terrain.destroy(ctx, terrain);
+    Water.destroy(ctx, water);
+    Heightmap.destroy(heightmap);
+
+    UgFence.destroy(ctx, fence);
+    UgCommandBuffer.destroy(ctx, cmd);
+    UgRenderer.destroy(ctx, renderer);
+    UgContext.destroy(ctx);
+    UgWindow.destroy(window);
+
+    return 0;
+}

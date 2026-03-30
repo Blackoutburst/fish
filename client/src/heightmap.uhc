@@ -1,0 +1,43 @@
+#include <math.h>
+
+#include "heightmap.uhh"
+
+namespace Heightmap {
+    Heightmap.It load(const char* path, F32 worldW, F32 worldD, F32 heightScale) {
+        Heightmap.It hm = {};
+        I32 channels;
+        hm.data = stbi_load(path, &hm.width, &hm.height, &channels, 1);
+        hm.worldW = worldW;
+        hm.worldD = worldD;
+        hm.heightScale = heightScale;
+        return hm;
+    }
+
+    F32 getHeight(Heightmap.It& hm, F32 worldX, F32 worldZ) {
+        F32 col = (worldX / hm.worldW + 0.5f) * (F32)(hm.width - 1);
+        F32 row = (worldZ / hm.worldD + 0.5f) * (F32)(hm.height - 1);
+
+        col = fmaxf(0.0f, fminf(col, (F32)(hm.width - 1)));
+        row = fmaxf(0.0f, fminf(row, (F32)(hm.height - 1)));
+
+        I32 c0 = (I32)col;
+        I32 r0 = (I32)row;
+        I32 c1 = (c0 + 1 < hm.width)  ? c0 + 1 : c0;
+        I32 r1 = (r0 + 1 < hm.height) ? r0 + 1 : r0;
+
+        F32 fc = col - (F32)c0;
+        F32 fr = row - (F32)r0;
+
+        F32 h00 = (F32)hm.data[r0 * hm.width + c0] / 255.0f * hm.heightScale;
+        F32 h10 = (F32)hm.data[r0 * hm.width + c1] / 255.0f * hm.heightScale;
+        F32 h01 = (F32)hm.data[r1 * hm.width + c0] / 255.0f * hm.heightScale;
+        F32 h11 = (F32)hm.data[r1 * hm.width + c1] / 255.0f * hm.heightScale;
+
+        return h00 * (1.0f - fc) * (1.0f - fr) + h10 * fc * (1.0f - fr) + h01 * (1.0f - fc) * fr + h11 * fc * fr;
+    }
+
+    U0 destroy(Heightmap.It& hm) {
+        stbi_image_free(hm.data);
+        hm.data = NULL;
+    }
+}

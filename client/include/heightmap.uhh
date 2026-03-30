@@ -1,0 +1,18 @@
+#pragma once
+
+#include <uhcgraphics.uhh>
+
+namespace Heightmap {
+    struct It {
+        U8* data;
+        I32 width;
+        I32 height;
+        F32 worldW;
+        F32 worldD;
+        F32 heightScale;
+    };
+
+    Heightmap.It load(const char* path, F32 worldW, F32 worldD, F32 heightScale);
+    F32 getHeight(Heightmap.It& hm, F32 worldX, F32 worldZ);
+    U0 destroy(Heightmap.It& hm);
+}

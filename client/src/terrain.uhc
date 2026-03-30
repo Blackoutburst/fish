@@ -1,0 +1,155 @@
+#include <stdlib.h>
+
+#include "terrain.uhh"
+
+namespace Terrain {
+    Terrain.It create(UgContext.It& ctx, UgRenderer.It& renderer, Heightmap.It& hm) {
+        U8* heightmap   = hm.data;
+        I32 hmWidth     = hm.width;
+        I32 hmHeight    = hm.height;
+        F32 terrainW    = hm.worldW;
+        F32 terrainD    = hm.worldD;
+        F32 heightScale = hm.heightScale;
+        I32 terrainStep = 4;
+        
+        I32 cols = (hmWidth  - 1) / terrainStep;
+        I32 rows = (hmHeight - 1) / terrainStep;
+        U32 vertexCount = (U32)(cols * rows * 6);
+        F32* vertices = (F32*)malloc(vertexCount * 6 * sizeof(F32));
+
+        U32 vi = 0;
+        for (I32 row = 0; row < rows; row++) {
+            for (I32 col = 0; col < cols; col++) {
+                I32 r0 = row * terrainStep;
+                I32 r1 = r0 + terrainStep;
+                I32 c0 = col * terrainStep;
+                I32 c1 = c0 + terrainStep;
+
+                F32 h00 = (F32)heightmap[r0 * hmWidth + c0] / 255.0f * heightScale;
+                F32 h10 = (F32)heightmap[r0 * hmWidth + c1] / 255.0f * heightScale;
+                F32 h01 = (F32)heightmap[r1 * hmWidth + c0] / 255.0f * heightScale;
+                F32 h11 = (F32)heightmap[r1 * hmWidth + c1] / 255.0f * heightScale;
+
+                F32 x0 = ((F32)c0 / (F32)(hmWidth  - 1) - 0.5f) * terrainW;
+                F32 x1 = ((F32)c1 / (F32)(hmWidth  - 1) - 0.5f) * terrainW;
+                F32 z0 = ((F32)r0 / (F32)(hmHeight - 1) - 0.5f) * terrainD;
+                F32 z1 = ((F32)r1 / (F32)(hmHeight - 1) - 0.5f) * terrainD;
+
+                F32 e1x = x1-x0, e1y = h10-h00, e1z = 0.0f;
+                F32 e2x = 0.0f,  e2y = h01-h00, e2z = z1-z0;
+                F32 n1x = e2y*e1z - e2z*e1y;
+                F32 n1y = e2z*e1x - e2x*e1z;
+                F32 n1z = e2x*e1y - e2y*e1x;
+                F32 n1l = sqrtf(n1x*n1x + n1y*n1y + n1z*n1z);
+                n1x/=n1l; n1y/=n1l; n1z/=n1l;
+
+                vertices[vi+0]=x0;
+                vertices[vi+1]=h00;
+                vertices[vi+2]=z0;
+                vertices[vi+3]=n1x;
+                vertices[vi+4]=n1y;
+                vertices[vi+5]=n1z;
+                vi+=6;
+
+                vertices[vi+0]=x1;
+                vertices[vi+1]=h10;
+                vertices[vi+2]=z0;
+                vertices[vi+3]=n1x;
+                vertices[vi+4]=n1y;
+                vertices[vi+5]=n1z;
+                vi+=6;
+
+                vertices[vi+0]=x0;
+                vertices[vi+1]=h01;
+                vertices[vi+2]=z1;
+                vertices[vi+3]=n1x;
+                vertices[vi+4]=n1y;
+                vertices[vi+5]=n1z;
+                vi+=6;
+
+                F32 f1x = 0.0f,  f1y = h11-h10, f1z = z1-z0;
+                F32 f2x = x0-x1, f2y = h01-h10, f2z = z1-z0;
+                F32 n2x = f2y*f1z - f2z*f1y;
+                F32 n2y = f2z*f1x - f2x*f1z;
+                F32 n2z = f2x*f1y - f2y*f1x;
+                F32 n2l = sqrtf(n2x*n2x + n2y*n2y + n2z*n2z);
+                n2x/=n2l; n2y/=n2l; n2z/=n2l;
+
+                vertices[vi+0]=x1;
+                vertices[vi+1]=h10;
+                vertices[vi+2]=z0;
+                vertices[vi+3]=n2x;
+                vertices[vi+4]=n2y;
+                vertices[vi+5]=n2z;
+                vi+=6;
+
+                vertices[vi+0]=x1;
+                vertices[vi+1]=h11;
+                vertices[vi+2]=z1;
+                vertices[vi+3]=n2x;
+                vertices[vi+4]=n2y;
+                vertices[vi+5]=n2z;
+                vi+=6;
+
+                vertices[vi+0]=x0;
+                vertices[vi+1]=h01;
+                vertices[vi+2]=z1;
+                vertices[vi+3]=n2x;
+                vertices[vi+4]=n2y;
+                vertices[vi+5]=n2z;
+                vi+=6;
+            }
+        }
+
+        UgBuffer.It vertexBuffer = UgBuffer.create(ctx, vertexCount * 6 * sizeof(F32), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+        UgBuffer.upload(ctx, vertexBuffer, vertices, vertexCount * 6 * sizeof(F32));
+        free(vertices);
+
+        UgVertexAttrib.It attrs[2] = {
+            { 0, VK_FORMAT_R32G32B32_SFLOAT, 0  },
+            { 1, VK_FORMAT_R32G32B32_SFLOAT, 12 },
+        };
+        UgVertexDesc.It desc = { 24, attrs, 2 };
+
+        UgUniformBuffer.It ubo = UgUniformBuffer.create(ctx, 0, 204);
+        UgMaterial.It material = UgMaterial.create(ctx, renderer.swapchain, "./shader/terrainVert.spv", "./shader/terrainFrag.spv", desc, 0, ubo, {});
+
+        Matrix.It model;
+        Matrix.setIdentity(model);
+
+        Terrain.It terrain;
+        terrain.ubo = ubo;
+        terrain.material = material;
+        terrain.vertexBuffer = vertexBuffer;
+        terrain.vertexCount = vertexCount;
+        terrain.model = model;
+
+        return terrain;
+    }
+
+    U0 render(Terrain.It& terrain, UgRenderer.It& renderer, UgCommandBuffer.It cmd, Matrix.It view, Matrix.It projection) {
+        UgMaterial.bind(terrain.material, renderer.renderPass, cmd, terrain.ubo);
+        
+        VectorF.It lightDir =  { -1, 0.8, -1, 0 };
+
+        
+        UgUniformBuffer.reset(terrain.ubo);
+        UgUniformBuffer.setMat(terrain.ubo, terrain.model);
+        UgUniformBuffer.setMat(terrain.ubo, view);
+        UgUniformBuffer.setMat(terrain.ubo, projection);
+        UgUniformBuffer.setVec3f(terrain.ubo, lightDir);
+
+        VkBuffer vertexBuffers[] = { terrain.vertexBuffer.handle };
+        VkDeviceSize offsets[] = { 0 };
+        vkCmdBindVertexBuffers(cmd.handle, 0, 1, vertexBuffers, offsets);
+        vkCmdDraw(cmd.handle, terrain.vertexCount, 1, 0, 0);
+    }
+
+    U0 destroy(UgContext.It ctx, Terrain.It& terrain) {
+        vkDeviceWaitIdle(ctx.device.handle);
+        
+        UgBuffer.destroy(ctx, terrain.vertexBuffer);
+        UgUniformBuffer.destroy(ctx, terrain.ubo);
+        UgMaterial.destroy(ctx, terrain.material);
+    }
+}
