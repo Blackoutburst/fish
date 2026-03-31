@@ -5,7 +5,7 @@ set INCLUDE=-Iout\include
 
 set I_UHC="%USERPROFILE%\.local\include"
 set L_UHC="%USERPROFILE%\.local\lib"
-set UHC=-I"%I_UHC%" -L"%L_UHC%" -lunholyc
+set UHC=-I"%I_UHC%" -L"%L_UHC%" -luhc
 
 set F_ERROR=-Wall -Wextra -Wpedantic
 set F_DEBUG=-g3 -fno-omit-frame-pointer

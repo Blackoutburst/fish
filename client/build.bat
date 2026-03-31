@@ -17,7 +17,7 @@ set GLFW=-I"%I_GLFW%" -L"%L_GLFW%" -lglfw3dll
 
 set I_UHC="%USERPROFILE%\.local\include"
 set L_UHC="%USERPROFILE%\.local\lib"
-set UHC=-I"%I_UHC%" -L"%L_UHC%" -lunholyc -luhcgraphics
+set UHC=-I"%I_UHC%" -L"%L_UHC%" -luhc -luhcgraphics
 
 set F_ERROR=-Wall -Wextra -Wpedantic
 set F_DEBUG=-g3 -fno-omit-frame-pointer -fsanitize=address -fsanitize-address-use-after-return=always
