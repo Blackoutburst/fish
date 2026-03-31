@@ -1,1 +1,4 @@
 *.exe
+Fish
+FishServer
+*.dSYM

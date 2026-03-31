@@ -23,7 +23,7 @@ set F_ERROR=-Wall -Wextra -Wpedantic
 set F_DEBUG=-g3 -fno-omit-frame-pointer -fsanitize=address -fsanitize-address-use-after-return=always
 set F_DISABLED=
 
-unholyc ./ -r -o out/
+unholyc -I%I_UHC% ./ out/
 
 echo CLANG:
 clang++ -o %NAME% %SRC% %INCLUDE% %UHC% %VK% %GLFW% %F_ERROR% %F_DEBUG% %F_DISABLED% -lws2_32

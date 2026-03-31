@@ -10,7 +10,7 @@ set UHC=-I"%I_UHC%" -L"%L_UHC%" -lunholyc
 set F_ERROR=-Wall -Wextra -Wpedantic
 set F_DEBUG=-g3 -fno-omit-frame-pointer
 
-unholyc ./ -r -o out/
+unholyc -I%I_UHC% ./ out/
 
 echo CLANG:
 clang++ -o %NAME% %SRC% %INCLUDE% %UHC% %F_ERROR% %F_DEBUG% -lws2_32
